@@ -1,0 +1,6 @@
+{
+  "name": "بريدك — عارض رسائل Gmail",
+  "description": "تطبيق لعرض وتصفح والبحث في رسائل البريد الإلكتروني الخاصة بك على Gmail بسهولة ووضوح.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
