@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   Archive,
@@ -70,9 +70,14 @@ const HEADER_NAV_ITEMS = [
 
 type ManualOverrideMap = Record<string, JobApplicationStatus | 'dismissed'>;
 
-function loadSavedOverrides(): ManualOverrideMap {
+function getOverrideStorageKey(email?: string) {
+  return email ? `${OVERRIDES_STORAGE_KEY}_${email}` : OVERRIDES_STORAGE_KEY;
+}
+
+function loadSavedOverrides(email?: string): ManualOverrideMap {
   try {
-    const raw = window.localStorage.getItem(OVERRIDES_STORAGE_KEY);
+    const key = getOverrideStorageKey(email);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -108,6 +113,7 @@ export default function App() {
   } | null>(null);
   const [jobScanError, setJobScanError] = useState<string | null>(null);
   const [hasLoadedJobsOnce, setHasLoadedJobsOnce] = useState<boolean>(false);
+  const [jobScanAttempted, setJobScanAttempted] = useState<boolean>(false);
   const [manualOverrides, setManualOverrides] = useState<ManualOverrideMap>(() =>
     loadSavedOverrides()
   );
@@ -129,6 +135,16 @@ export default function App() {
   const [threadError, setThreadError] = useState<string | null>(null);
   const [mobileShowReader, setMobileShowReader] = useState<boolean>(false);
 
+  const mailboxRequestIdRef = useRef(0);
+  const threadRequestIdRef = useRef(0);
+  const jobScanRequestIdRef = useRef(0);
+
+  const currentUserEmail = profile?.emailAddress || user?.email || '';
+
+  useEffect(() => {
+    setManualOverrides(loadSavedOverrides(currentUserEmail));
+  }, [currentUserEmail]);
+
   useEffect(() => {
     const unsubscribe = initAuth(
       (authenticatedUser) => {
@@ -137,6 +153,7 @@ export default function App() {
         setAuthChecking(false);
       },
       () => {
+        setUser(null);
         setNeedsAuth(true);
         setAuthChecking(false);
       }
@@ -150,7 +167,28 @@ export default function App() {
     setAuthError('انتهت صلاحية الجلسة، يرجى تسجيل الدخول مرة أخرى لعرض رسائلك.');
   }, []);
 
-  const currentUserEmail = profile?.emailAddress || user?.email || '';
+  const resetMailboxState = useCallback(() => {
+    setMessages([]);
+    setNextPageToken(undefined);
+    setSelectedMessage(null);
+    setSelectedThread(null);
+    setListError(null);
+    setThreadError(null);
+    setIsLoadingList(false);
+    setIsLoadingMore(false);
+  }, []);
+
+  const resetJobState = useCallback(() => {
+    setRawJobThreads([]);
+    setJobCursors(undefined);
+    setHasMoreJobPages(false);
+    setIsScanningJobs(false);
+    setIsScanningMoreJobs(false);
+    setJobScanProgress(null);
+    setJobScanError(null);
+    setHasLoadedJobsOnce(false);
+    setJobScanAttempted(false);
+  }, []);
 
   const classifiedJobItems = useMemo<ClassifiedJobThread[]>(() => {
     const results: ClassifiedJobThread[] = [];
@@ -170,14 +208,17 @@ export default function App() {
       setManualOverrides((prev) => {
         const next = { ...prev, [threadId]: newStatus };
         try {
-          window.localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(next));
+          window.localStorage.setItem(
+            getOverrideStorageKey(currentUserEmail),
+            JSON.stringify(next)
+          );
         } catch {
           // ignore storage quota errors
         }
         return next;
       });
     },
-    []
+    [currentUserEmail]
   );
 
   const runJobScan = useCallback(
@@ -188,10 +229,13 @@ export default function App() {
         return;
       }
 
+      const requestId = ++jobScanRequestIdRef.current;
+
       if (reset) {
         setIsScanningJobs(true);
         setJobScanError(null);
         setJobScanProgress({ completed: 0, total: 0 });
+        setJobScanAttempted(true);
       } else {
         setIsScanningMoreJobs(true);
       }
@@ -205,11 +249,14 @@ export default function App() {
           cursors: reset ? undefined : jobCursors,
           knownThreadIds: knownIds,
           onProgress: (completed, total) => {
+            if (requestId !== jobScanRequestIdRef.current) return;
             if (reset) {
               setJobScanProgress({ completed, total });
             }
           },
         });
+
+        if (requestId !== jobScanRequestIdRef.current) return;
 
         setJobCursors(res.nextCursors);
         setHasMoreJobPages(res.hasMore);
@@ -225,6 +272,7 @@ export default function App() {
           });
         }
       } catch (err) {
+        if (requestId !== jobScanRequestIdRef.current) return;
         if (err instanceof GmailAuthError) {
           handleAuthExpired();
           return;
@@ -233,6 +281,7 @@ export default function App() {
           err instanceof Error ? err.message : 'تعذر فحص رسائل التوظيف.'
         );
       } finally {
+        if (requestId !== jobScanRequestIdRef.current) return;
         setIsScanningJobs(false);
         setIsScanningMoreJobs(false);
         setJobScanProgress(null);
@@ -301,12 +350,16 @@ export default function App() {
         return;
       }
 
+      const requestId = ++threadRequestIdRef.current;
       setIsLoadingThread(true);
       setThreadError(null);
+
       try {
         const detail = await getThreadDetail(token, msg.threadId, msg.id);
+        if (requestId !== threadRequestIdRef.current) return;
         setSelectedThread(detail);
       } catch (err) {
+        if (requestId !== threadRequestIdRef.current) return;
         if (err instanceof GmailAuthError) {
           handleAuthExpired();
           return;
@@ -315,6 +368,7 @@ export default function App() {
           err instanceof Error ? err.message : 'تعذر تحميل تفاصيل الرسالة.'
         );
       } finally {
+        if (requestId !== threadRequestIdRef.current) return;
         setIsLoadingThread(false);
       }
     },
@@ -328,6 +382,8 @@ export default function App() {
         setNeedsAuth(true);
         return;
       }
+
+      const requestId = ++mailboxRequestIdRef.current;
 
       if (resetList) {
         setIsLoadingList(true);
@@ -350,6 +406,8 @@ export default function App() {
           maxResults: 25,
         });
 
+        if (requestId !== mailboxRequestIdRef.current) return;
+
         setNextPageToken(result.nextPageToken);
 
         if (resetList) {
@@ -357,7 +415,7 @@ export default function App() {
           if (result.messages.length > 0) {
             const first = result.messages[0];
             setSelectedMessage(first);
-            loadThreadForMessage(first);
+            void loadThreadForMessage(first);
           } else {
             setSelectedMessage(null);
             setSelectedThread(null);
@@ -370,6 +428,7 @@ export default function App() {
           });
         }
       } catch (err) {
+        if (requestId !== mailboxRequestIdRef.current) return;
         if (err instanceof GmailAuthError) {
           handleAuthExpired();
           return;
@@ -378,18 +437,12 @@ export default function App() {
           err instanceof Error ? err.message : 'حدث خطأ أثناء جلب رسائل البريد.'
         );
       } finally {
+        if (requestId !== mailboxRequestIdRef.current) return;
         setIsLoadingList(false);
         setIsLoadingMore(false);
       }
     },
-    [
-      activeFolderMeta,
-      submittedSearch,
-      activeFilter,
-      buildCombinedQuery,
-      handleAuthExpired,
-      loadThreadForMessage,
-    ]
+    [activeFolderMeta, submittedSearch, activeFilter, buildCombinedQuery, handleAuthExpired, loadThreadForMessage]
   );
 
   useEffect(() => {
@@ -399,14 +452,14 @@ export default function App() {
   }, [needsAuth, loadAccountOverview]);
 
   useEffect(() => {
-    if (!needsAuth && activeFolderId === 'JOBS' && !hasLoadedJobsOnce && !isScanningJobs) {
-      runJobScan(true);
+    if (!needsAuth && activeFolderId === 'JOBS' && !jobScanAttempted && !isScanningJobs) {
+      void runJobScan(true);
     }
-  }, [needsAuth, activeFolderId, hasLoadedJobsOnce, isScanningJobs, runJobScan]);
+  }, [needsAuth, activeFolderId, jobScanAttempted, isScanningJobs, runJobScan]);
 
   useEffect(() => {
     if (!needsAuth && activeFolderId !== 'JOBS') {
-      fetchMessages(true);
+      void fetchMessages(true);
     }
   }, [needsAuth, activeFolderId, submittedSearch, activeFilter, fetchMessages]);
 
@@ -439,23 +492,29 @@ export default function App() {
     await logout();
     setUser(null);
     setProfile(null);
-    setMessages([]);
-    setRawJobThreads([]);
-    setHasLoadedJobsOnce(false);
-    setSelectedMessage(null);
-    setSelectedThread(null);
+    setInboxUnreadCount(null);
+    setUserLabels([]);
+    setAuthError(null);
+    setManualOverrides({});
+    resetMailboxState();
+    resetJobState();
     setNeedsAuth(true);
   };
 
   const handleSelectFolder = (folderId: string) => {
     setActiveFolderId(folderId);
     setMobileShowReader(false);
+    if (folderId !== 'JOBS') {
+      setSelectedThread(null);
+      setSelectedMessage(null);
+      setThreadError(null);
+    }
   };
 
   const handleSelectMessage = (msg: EmailMessageSummary) => {
     setSelectedMessage(msg);
     setMobileShowReader(true);
-    loadThreadForMessage(msg);
+    void loadThreadForMessage(msg);
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -471,8 +530,8 @@ export default function App() {
   };
 
   const handleRefresh = () => {
-    loadAccountOverview();
-    fetchMessages(true);
+    void loadAccountOverview();
+    void fetchMessages(true);
   };
 
   const handleDownloadAttachment = async (
@@ -484,7 +543,15 @@ export default function App() {
       handleAuthExpired();
       return;
     }
-    await downloadAttachmentFile(token, messageId, attachment);
+
+    try {
+      await downloadAttachmentFile(token, messageId, attachment);
+    } catch (err) {
+      console.error('Failed to download attachment:', err);
+      setThreadError(
+        err instanceof Error ? err.message : 'تعذّر تنزيل المرفق.'
+      );
+    }
   };
 
   const renderFolderIcon = (id: string) => {
@@ -537,7 +604,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   if (needsAuth) {
-                    handleLogin();
+                    void handleLogin();
                   } else {
                     handleSelectFolder(navItem.id);
                   }
@@ -557,7 +624,7 @@ export default function App() {
           {needsAuth ? (
             <button
               type="button"
-              onClick={handleLogin}
+              onClick={() => void handleLogin()}
               disabled={isLoggingIn}
               className="lg-pill lg-pill-primary !py-2.5 shrink-0"
             >
@@ -566,7 +633,7 @@ export default function App() {
           ) : (
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() => void handleLogout()}
               className="lg-pill !py-2.5 shrink-0"
             >
               تسجيل الخروج
@@ -593,12 +660,12 @@ export default function App() {
               اعرف فوراً الوظائف التي قُبلت فيها أو رُفضت أو ما زلت تنتظر رداً عليها
             </h1>
             <p className="text-base text-slate-600 leading-relaxed max-w-xl mb-8">
-              سجّل الدخول بحساب Google لفحص رسائل التقديم التي أرسلتها والردود الواردة من الشركات ومنصات التوظيف، وتصنيفها تلقائياً إلى طلبات مقبولة ومقابلات، وطلبات قيد الانتظار، وطلبات تم الاعتذار عنها.
+              سجّل الدخول بحساب Google لفحص رسائل التقديم التي أرسلتها والردود الواردة من الشركات ومنصات التوظيف، وتصنيفها تلقائياً في متابعة الوظائف.
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mb-6">
               <GoogleSignInButton
-                onClick={handleLogin}
+                onClick={() => void handleLogin()}
                 disabled={isLoggingIn}
                 label={isLoggingIn ? 'Signing in...' : 'Sign in with Google'}
               />
@@ -815,8 +882,8 @@ export default function App() {
               scanProgress={jobScanProgress}
               error={jobScanError}
               hasMorePages={hasMoreJobPages}
-              onRescan={() => runJobScan(true)}
-              onScanMore={() => runJobScan(false)}
+              onRescan={() => void runJobScan(true)}
+              onScanMore={() => void runJobScan(false)}
               onOverrideStatus={handleOverrideJobStatus}
               onDownloadAttachment={handleDownloadAttachment}
             />
@@ -923,7 +990,7 @@ export default function App() {
                   <span>{listError}</span>
                   <button
                     type="button"
-                    onClick={() => fetchMessages(true)}
+                    onClick={() => void fetchMessages(true)}
                     className="font-semibold underline whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     إعادة المحاولة
@@ -957,7 +1024,7 @@ export default function App() {
                       isLoading={isLoadingList}
                       isLoadingMore={isLoadingMore}
                       hasNextPage={Boolean(nextPageToken)}
-                      onLoadMore={() => fetchMessages(false, nextPageToken)}
+                      onLoadMore={() => void fetchMessages(false, nextPageToken)}
                       hasActiveFilters={hasActiveFilters}
                       onResetFilters={handleResetFilters}
                       folderTitle={activeFolderMeta.label}
@@ -1015,7 +1082,9 @@ export default function App() {
                     isLoading={isLoadingThread}
                     error={threadError}
                     onRetry={() => {
-                      if (selectedMessage) loadThreadForMessage(selectedMessage);
+                      if (selectedMessage) {
+                        void loadThreadForMessage(selectedMessage);
+                      }
                     }}
                     onBackMobile={() => setMobileShowReader(false)}
                     onDownloadAttachment={handleDownloadAttachment}
