@@ -519,7 +519,7 @@ export default function App() {
             e.preventDefault();
             if (!needsAuth) handleSelectFolder('JOBS');
           }}
-          className="text-lg font-bold tracking-tight text-slate-950 whitespace-nowrap shrink-0 bg-linear-to-l from-blue-600 to-indigo-500 bg-clip-text text-transparent"
+          className="text-lg font-bold tracking-tight text-slate-950 whitespace-nowrap shrink-0 bg-linear-to-l from-blue-500 via-purple-500 to-pink-500 bg-clip-text text-transparent"
         >
           بريدك
         </a>
@@ -589,7 +589,7 @@ export default function App() {
             <p className="inline-flex glass-thin rounded-full px-3.5 py-1.5 text-xs font-semibold text-blue-700 mb-5">
               متابعة طلبات التوظيف وتصفح البريد من حسابك في Gmail
             </p>
-            <h1 className="text-3xl sm:text-4xl font-bold text-slate-950 tracking-tight leading-tight text-balance max-w-2xl mb-4">
+            <h1 className="lg-gradient-text text-3xl sm:text-4xl font-bold tracking-tight leading-tight text-balance max-w-2xl mb-4">
               اعرف فوراً الوظائف التي قُبلت فيها أو رُفضت أو ما زلت تنتظر رداً عليها
             </h1>
             <p className="text-base text-slate-600 leading-relaxed max-w-xl mb-8">
@@ -617,7 +617,10 @@ export default function App() {
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-8 mt-10 border-t border-[color:var(--lg-hairline)]">
-              <div className="glass-thin rounded-3xl p-5">
+              <div
+                style={{ animationDelay: '120ms' }}
+                className="lg-anim-in lg-lift lg-feat lg-feat-green glass-thin rounded-3xl p-5"
+              >
                 <h2 className="text-sm font-semibold text-slate-900 mb-1.5">
                   عروض القبول والمقابلات
                 </h2>
@@ -625,7 +628,10 @@ export default function App() {
                   يجمع رسائل القبول وعروض العمل ودعوات المقابلات والتقييمات الفنية في قائمة واحدة واضحة.
                 </p>
               </div>
-              <div className="glass-thin rounded-3xl p-5">
+              <div
+                style={{ animationDelay: '220ms' }}
+                className="lg-anim-in lg-lift lg-feat lg-feat-amber glass-thin rounded-3xl p-5"
+              >
                 <h2 className="text-sm font-semibold text-slate-900 mb-1.5">
                   طلبات أرسلتها وتنتظر الرد
                 </h2>
@@ -633,7 +639,10 @@ export default function App() {
                   يرصد السير الذاتية والطلبات التي أرسلتها ولم يصلها رد بعد مع حساب عدد الأيام منذ التقديم.
                 </p>
               </div>
-              <div className="glass-thin rounded-3xl p-5">
+              <div
+                style={{ animationDelay: '320ms' }}
+                className="lg-anim-in lg-lift lg-feat lg-feat-red glass-thin rounded-3xl p-5"
+              >
                 <h2 className="text-sm font-semibold text-slate-900 mb-1.5">
                   رسائل الاعتذار والرفض
                 </h2>
